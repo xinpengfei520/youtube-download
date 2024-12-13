@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube视频下载器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <!-- 标题部分 -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">YouTube视频下载器</h1>
+            <p class="text-gray-600">输入YouTube视频链接，轻松下载高质量视频</p>
+        </div>
+
+        <!-- 输入部分 -->
+        <div class="max-w-2xl mx-auto mb-8">
+            <div class="flex gap-2">
+                <input type="text" 
+                       id="video-url" 
+                       class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                       placeholder="请输入YouTube视频链接">
+                <button onclick="startDownload()"
+                        class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                    下载
+                </button>
+            </div>
+            <!-- 下载进度 -->
+            <div id="progress" class="mt-4 hidden">
+                <div class="w-full bg-gray-200 rounded-full h-2.5">
+                    <div id="progress-bar" 
+                         class="bg-blue-600 h-2.5 rounded-full" 
+                         style="width: 0%">
+                    </div>
+                </div>
+                <p id="progress-text" class="text-sm text-gray-600 mt-1"></p>
+            </div>
+        </div>
+
+        <!-- 视频列表 -->
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-2xl font-bold mb-4">已下载视频</h2>
+            <div class="grid gap-4 grid-cols-1 md:grid-cols-2">
+                {% for video in videos %}
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <video class="w-full rounded-lg mb-2" controls>
+                        <source src="/video/{{ video.local_path.split('/')[-1] }}" type="video/mp4">
+                        您的浏览器不支持视频播放
+                    </video>
+                    <h3 class="text-lg font-semibold mb-1">{{ video.title }}</h3>
+                    <div class="text-sm text-gray-600">
+                        <p>作者: {{ video.author }}</p>
+                        <p>时长: {{ video.duration }}秒</p>
+                        <p>文件大小: {{ (video.file_size / 1024 / 1024) | round(2) }}MB</p>
+                        <p>下载时间: {{ video.download_date }}</p>
+                    </div>
+                    <details class="mt-2">
+                        <summary class="text-sm text-blue-500 cursor-pointer">查看描述</summary>
+                        <p class="text-sm text-gray-600 mt-1">{{ video.description }}</p>
+                    </details>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+
+        function startDownload() {
+            const url = document.getElementById('video-url').value;
+            if (!url) {
+                alert('请输入视频链接');
+                return;
+            }
+
+            // 显示进度条
+            document.getElementById('progress').classList.remove('hidden');
+            
+            // 建立WebSocket连接
+            ws = new WebSocket(`ws://${window.location.host}/ws/download`);
+            
+            ws.onopen = () => {
+                ws.send(url);
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.status === 'downloading') {
+                    const progress = (data.downloaded_bytes / data.total_bytes * 100).toFixed(1);
+                    const speed = (data.speed / 1024 / 1024).toFixed(2);
+                    
+                    document.getElementById('progress-bar').style.width = `${progress}%`;
+                    document.getElementById('progress-text').textContent = 
+                        `下载进度: ${progress}% (${speed} MB/s) - 预计剩余时间: ${data.eta}秒`;
+                }
+                else if (data.status === 'complete') {
+                    document.getElementById('progress-text').textContent = '下载完成！';
+                    setTimeout(() => {
+                        document.getElementById('progress').classList.add('hidden');
+                        location.reload(); // 刷新页面显示新下载的视频
+                    }, 1000);
+                }
+                else if (data.status === 'error') {
+                    document.getElementById('progress-text').textContent = `错误: ${data.message}`;
+                }
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket错误:', error);
+                document.getElementById('progress-text').textContent = '连接错误';
+            };
+            
+            ws.onclose = () => {
+                console.log('WebSocket连接已关闭');
+            };
+        }
+    </script>
+</body>
+</html>
