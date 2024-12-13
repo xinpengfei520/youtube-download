@@ -8,19 +8,31 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime
+import boto3
+from botocore.exceptions import ClientError
 
 app = FastAPI()
 
-# 静态文件和模板配置
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+# 获取项目根目录的绝对路径
+ROOT_DIR = Path(__file__).resolve().parent
+
+# 修改静态文件和模板配置
+app.mount("/static", StaticFiles(directory=str(ROOT_DIR / "static")), name="static")
+templates = Jinja2Templates(directory=str(ROOT_DIR / "templates"))
 
 # 创建下载目录
-DOWNLOAD_DIR = Path("downloads")
+DOWNLOAD_DIR = ROOT_DIR / "downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
 # 存储下载任务状态
 download_tasks = {}
+
+# 添加S3支持
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id='your_access_key',
+    aws_secret_access_key='your_secret_key'
+)
 
 def get_video_info(url):
     with yt_dlp.YoutubeDL() as ydl:
@@ -62,14 +74,14 @@ async def download_video(url: str, websocket: WebSocket):
             info = ydl.extract_info(url)
             video_path = DOWNLOAD_DIR / f"{info['title']}.{info['ext']}"
             
-            # 保存视频信息
+            # 使用本地路径
             video_info = {
                 "title": info["title"],
                 "duration": info["duration"],
                 "author": info["uploader"],
                 "description": info["description"],
                 "file_size": os.path.getsize(video_path),
-                "local_path": str(video_path),
+                "local_path": str(video_path),  # 改回使用本地路径
                 "download_date": datetime.now().isoformat()
             }
             
