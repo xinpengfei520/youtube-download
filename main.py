@@ -1,15 +1,13 @@
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import FastAPI, Request, WebSocket, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import yt_dlp
 import asyncio
 import json
-import os
 from pathlib import Path
 from datetime import datetime
-import boto3
-from botocore.exceptions import ClientError
+import io
 
 app = FastAPI()
 
@@ -20,33 +18,9 @@ ROOT_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=str(ROOT_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(ROOT_DIR / "templates"))
 
-# 创建下载目录
-DOWNLOAD_DIR = ROOT_DIR / "downloads"
-DOWNLOAD_DIR.mkdir(exist_ok=True)
-
-# 存储下载任务状态
-download_tasks = {}
-
-# 添加S3支持
-s3_client = boto3.client(
-    's3',
-    aws_access_key_id='your_access_key',
-    aws_secret_access_key='your_secret_key'
-)
-
-def get_video_info(url):
-    with yt_dlp.YoutubeDL() as ydl:
-        try:
-            info = ydl.extract_info(url, download=False)
-            return {
-                "title": info["title"],
-                "duration": info["duration"],
-                "author": info["uploader"],
-                "description": info["description"],
-                "thumbnail": info["thumbnail"]
-            }
-        except Exception as e:
-            return {"error": str(e)}
+# 使用内存存储视频信息
+videos_info = []
+videos_data = {}  # 用于存储视频二进制数据
 
 async def download_video(url: str, websocket: WebSocket):
     def progress_hook(d):
@@ -66,30 +40,25 @@ async def download_video(url: str, websocket: WebSocket):
     ydl_opts = {
         'format': 'best',
         'progress_hooks': [progress_hook],
-        'outtmpl': str(DOWNLOAD_DIR / '%(title)s.%(ext)s')
+        'outtmpl': '-'  # 输出到内存
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url)
-            video_path = DOWNLOAD_DIR / f"{info['title']}.{info['ext']}"
-            
-            # 使用本地路径
+            info = ydl.extract_info(url, download=False)
             video_info = {
                 "title": info["title"],
                 "duration": info["duration"],
                 "author": info["uploader"],
                 "description": info["description"],
-                "file_size": os.path.getsize(video_path),
-                "local_path": str(video_path),  # 改回使用本地路径
+                "file_size": info.get("filesize", 0),
+                "video_id": info["id"],
                 "download_date": datetime.now().isoformat()
             }
             
-            # 将视频信息保存到JSON文件
-            with open(DOWNLOAD_DIR / "videos.json", "a+") as f:
-                json.dump(video_info, f)
-                f.write("\n")
-                
+            # 将视频信息添加到内存列表
+            videos_info.append(video_info)
+            
             return video_info
     except Exception as e:
         await websocket.send_json({"status": "error", "message": str(e)})
@@ -97,18 +66,24 @@ async def download_video(url: str, websocket: WebSocket):
 
 @app.get("/")
 async def home(request: Request):
-    # 读取已下载的视频列表
-    videos = []
-    if (DOWNLOAD_DIR / "videos.json").exists():
-        with open(DOWNLOAD_DIR / "videos.json", "r") as f:
-            for line in f:
-                if line.strip():
-                    videos.append(json.loads(line))
-    
     return templates.TemplateResponse(
         "index.html", 
-        {"request": request, "videos": videos}
+        {"request": request, "videos": videos_info}
     )
+
+@app.get("/video/{video_id}")
+async def serve_video(video_id: str):
+    video_info = next((v for v in videos_info if v["video_id"] == video_id), None)
+    if not video_info:
+        return JSONResponse({"error": "Video not found"}, status_code=404)
+    
+    # 这里需要实现视频流式传输
+    # 在实际应用中，你可能需要将视频存储在云存储服务中
+    return JSONResponse({"error": "Video streaming not implemented"}, status_code=501)
+
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok"}
 
 @app.websocket("/ws/download")
 async def websocket_download(websocket: WebSocket):
@@ -123,11 +98,4 @@ async def websocket_download(websocket: WebSocket):
     except Exception as e:
         await websocket.send_json({"status": "error", "message": str(e)})
     finally:
-        await websocket.close()
-
-@app.get("/video/{video_name}")
-async def serve_video(video_name: str):
-    video_path = DOWNLOAD_DIR / video_name
-    if video_path.exists():
-        return FileResponse(video_path)
-    return JSONResponse({"error": "Video not found"}, status_code=404) 
+        await websocket.close() 

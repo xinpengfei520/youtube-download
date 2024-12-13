@@ -44,15 +44,10 @@
             <div class="grid gap-4 grid-cols-1 md:grid-cols-2">
                 {% for video in videos %}
                 <div class="bg-white rounded-lg shadow-md p-4">
-                    <video class="w-full rounded-lg mb-2" controls>
-                        <source src="/video/{{ video.local_path.split('/')[-1] }}" type="video/mp4">
-                        您的浏览器不支持视频播放
-                    </video>
                     <h3 class="text-lg font-semibold mb-1">{{ video.title }}</h3>
                     <div class="text-sm text-gray-600">
                         <p>作者: {{ video.author }}</p>
                         <p>时长: {{ video.duration }}秒</p>
-                        <p>文件大小: {{ (video.file_size / 1024 / 1024) | round(2) }}MB</p>
                         <p>下载时间: {{ video.download_date }}</p>
                     </div>
                     <details class="mt-2">
